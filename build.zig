@@ -8,11 +8,17 @@ pub fn build(b: *std.Build) void {
     // define program executable (installable)
     const exe = b.addExecutable(.{
         .name = "aoc25",
-        .root_source_file = b.path("src/day2/part2.zig"),
+        .root_source_file = b.path("src/day3/part1.zig"),
         .target = target,
         .optimize = optimize,
     });
     b.installArtifact(exe);
+
+    // link against utils module
+    const utils_module = b.addModule("utils", .{
+        .root_source_file = b.path("src/utils.zig"),
+    });
+    exe.root_module.addImport("utils", utils_module);
 
     // define run step
     const run_cmd = b.addRunArtifact(exe);
