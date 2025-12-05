@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // define program executable (installable)
     const exe = b.addExecutable(.{
         .name = "aoc25",
-        .root_source_file = b.path("src/day3/part2.zig"),
+        .root_source_file = b.path("src/day4/part1.zig"),
         .target = target,
         .optimize = optimize,
     });
