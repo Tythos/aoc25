@@ -11,8 +11,39 @@ pub fn split_string_by_delimiter(allocator: std.mem.Allocator, content: []const 
     var parts = std.ArrayList([]const u8).init(allocator);
     var iterator = std.mem.splitSequence(u8, content, delimiter);
     while (iterator.next()) |range| {
-        if (range.len == 0) continue;
+        if (range.len == 0) continue; // skip consecutive empty parts
         try parts.append(range);
     }
     return parts;
+}
+
+/// returns a copy of the given string with leading and trailing whitespace removed
+pub fn strip_string(content: []const u8) []const u8 {
+    var i_start: usize = 0;
+    var i_end: usize = content.len;
+    const whitespace = " \t\n\r";
+    while (i_start < content.len and std.mem.indexOfScalar(u8, whitespace, content[i_start]) != null) {
+        i_start += 1;
+    }
+    while (i_end > i_start and std.mem.indexOfScalar(u8, whitespace, content[i_end - 1]) != null) {
+        i_end -= 1;
+    }
+    return content[i_start..i_end];
+}
+
+test "split_string" {
+    const allocator = std.testing.allocator;
+    const content = "farewell, cruel world!";
+    const parts = try split_string_by_delimiter(allocator, content, " ");
+    defer parts.deinit();
+    try std.testing.expectEqual(parts.items.len, 3);
+    try std.testing.expectEqualStrings("farewell,", parts.items[0]);
+    try std.testing.expectEqualStrings("cruel", parts.items[1]);
+    try std.testing.expectEqualStrings("world!", parts.items[2]);
+}
+
+test "strip_string" {
+    const content = " \t hello world  \n";
+    const result = strip_string(content);
+    try std.testing.expectEqualStrings("hello world", result);
 }
