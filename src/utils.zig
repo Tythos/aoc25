@@ -12,9 +12,21 @@ pub fn split_string_by_delimiter(allocator: std.mem.Allocator, content: []const 
     var iterator = std.mem.splitSequence(u8, content, delimiter);
     while (iterator.next()) |range| {
         if (range.len == 0) continue; // skip consecutive empty parts
-        try parts.append(range);
+        const owned_string = try allocator.dupe(u8, range);
+        try parts.append(owned_string);
     }
     return parts;
+}
+
+pub fn free_string_list(allocator: std.mem.Allocator, strings: std.ArrayList([]const u8)) void {
+    for (strings.items) |string| {
+        allocator.free(string);
+    }
+    strings.deinit();
+}
+
+pub fn contains(content: []const u8, needle: []const u8) bool {
+    return std.mem.indexOf(u8, content, needle) != null;
 }
 
 /// returns a copy of the given string with leading and trailing whitespace removed
@@ -46,4 +58,11 @@ test "strip_string" {
     const content = " \t hello world  \n";
     const result = strip_string(content);
     try std.testing.expectEqualStrings("hello world", result);
+}
+
+test "contains" {
+    const content = "hello world";
+    const needle = "world";
+    const result = contains(content, needle);
+    try std.testing.expect(result);
 }
