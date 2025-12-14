@@ -11,7 +11,7 @@ pub fn split_string_by_delimiter(allocator: std.mem.Allocator, content: []const 
     var parts = std.ArrayList([]const u8).init(allocator);
     var iterator = std.mem.splitSequence(u8, content, delimiter);
     while (iterator.next()) |range| {
-        if (range.len == 0) continue; // skip consecutive empty parts
+        if (range.len == 0) continue;
         const owned_string = try allocator.dupe(u8, range);
         try parts.append(owned_string);
     }
@@ -47,7 +47,7 @@ test "split_string" {
     const allocator = std.testing.allocator;
     const content = "farewell, cruel world!";
     const parts = try split_string_by_delimiter(allocator, content, " ");
-    defer parts.deinit();
+    defer free_string_list(allocator, parts);
     try std.testing.expectEqual(parts.items.len, 3);
     try std.testing.expectEqualStrings("farewell,", parts.items[0]);
     try std.testing.expectEqualStrings("cruel", parts.items[1]);
