@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // define program executable (installable)
     const exe = b.addExecutable(.{
         .name = "aoc25",
-        .root_source_file = b.path("src/day9/part2.zig"),
+        .root_source_file = b.path("src/day10/part1.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -37,7 +37,17 @@ pub fn build(b: *std.Build) void {
     });
     const run_utils_tests = b.addRunArtifact(utils_tests);
     
+    // add day10 part1 tests
+    const day10_part1_tests = b.addTest(.{
+        .root_source_file = b.path("src/day10/part1.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    day10_part1_tests.root_module.addImport("utils", utils_module);
+    const run_day10_part1_tests = b.addRunArtifact(day10_part1_tests);
+    
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_utils_tests.step);
+    test_step.dependOn(&run_day10_part1_tests.step);
     b.default_step = test_step;
 }
