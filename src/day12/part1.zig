@@ -1,447 +1,266 @@
-// --- Day 12: Christmas Tree Farm ---
-
-// You're almost out of time, but there can't be much left to decorate. Although there are no stairs, elevators, escalators, tunnels, chutes, teleporters, firepoles, or conduits here that would take you deeper into the North Pole base, there is a ventilation duct. You jump in.
-
-// After bumping around for a few minutes, you emerge into a large, well-lit cavern full of Christmas trees!
-
-// There are a few Elves here frantically decorating before the deadline. They think they'll be able to finish most of the work, but the one thing they're worried about is the presents for all the young Elves that live here at the North Pole. It's an ancient tradition to put the presents under the trees, but the Elves are worried they won't fit.
-
-// The presents come in a few standard but very weird shapes. The shapes and the regions into which they need to fit are all measured in standard units. To be aesthetically pleasing, the presents need to be placed into the regions in a way that follows a standardized two-dimensional unit grid; you also can't stack presents.
-
-// As always, the Elves have a summary of the situation (your puzzle input) for you. First, it contains a list of the presents' shapes. Second, it contains the size of the region under each tree and a list of the number of presents of each shape that need to fit into that region. For example:
-
-// 0:
-// ###
-// ##.
-// ##.
-
-// 1:
-// ###
-// ##.
-// .##
-
-// 2:
-// .##
-// ###
-// ##.
-
-// 3:
-// ##.
-// ###
-// ##.
-
-// 4:
-// ###
-// #..
-// ###
-
-// 5:
-// ###
-// .#.
-// ###
-
-// 4x4: 0 0 0 0 2 0
-// 12x5: 1 0 1 0 2 2
-// 12x5: 1 0 1 0 3 2
-// The first section lists the standard present shapes. For convenience, each shape starts with its index and a colon; then, the shape is displayed visually, where # is part of the shape and . is not.
-
-// The second section lists the regions under the trees. Each line starts with the width and length of the region; 12x5 means the region is 12 units wide and 5 units long. The rest of the line describes the presents that need to fit into that region by listing the quantity of each shape of present; 1 0 1 0 3 2 means you need to fit one present with shape index 0, no presents with shape index 1, one present with shape index 2, no presents with shape index 3, three presents with shape index 4, and two presents with shape index 5.
-
-// Presents can be rotated and flipped as necessary to make them fit in the available space, but they have to always be placed perfectly on the grid. Shapes can't overlap (that is, the # part from two different presents can't go in the same place on the grid), but they can fit together (that is, the . part in a present's shape's diagram does not block another present from occupying that space on the grid).
-
-// The Elves need to know how many of the regions can fit the presents listed. In the above example, there are six unique present shapes and three regions that need checking.
-
-// The first region is 4x4:
-
-// ....
-// ....
-// ....
-// ....
-// In it, you need to determine whether you could fit two presents that have shape index 4:
-
-// ###
-// #..
-// ###
-// After some experimentation, it turns out that you can fit both presents in this region. Here is one way to do it, using A to represent one present and B to represent the other:
-
-// AAA.
-// ABAB
-// ABAB
-// .BBB
-// The second region, 12x5: 1 0 1 0 2 2, is 12 units wide and 5 units long. In that region, you need to try to fit one present with shape index 0, one present with shape index 2, two presents with shape index 4, and two presents with shape index 5.
-
-// It turns out that these presents can all fit in this region. Here is one way to do it, again using different capital letters to represent all the required presents:
-
-// ....AAAFFE.E
-// .BBBAAFFFEEE
-// DDDBAAFFCECE
-// DBBB....CCC.
-// DDD.....C.C.
-// The third region, 12x5: 1 0 1 0 3 2, is the same size as the previous region; the only difference is that this region needs to fit one additional present with shape index 4. Unfortunately, no matter how hard you try, there is no way to fit all of the presents into this region.
-
-// So, in this example, 2 regions can fit all of their listed presents.
-
-// Consider the regions beneath each tree and the presents the Elves would like to fit into each of them. How many of the regions can fit all of the presents listed?
-
-
 const std = @import("std");
+const utils = @import("utils");
+
+const MAX_SHAPE_SIZE = 3;
+const MAX_SHAPES = 16;
+const MAX_GRID_WIDTH = 64;
+const MAX_GRID_HEIGHT = 64;
+
+// A shape is represented as a list of (row, col) offsets from top-left
+const Point = struct {
+    row: i32,
+    col: i32,
+};
 
 const Shape = struct {
-    cells: std.ArrayList(Pos),
+    points: [9]Point,
+    num_points: usize,
     width: usize,
     height: usize,
-
-    fn deinit(self: *Shape) void {
-        self.cells.deinit();
-    }
 };
 
-const Pos = struct {
-    x: i32,
-    y: i32,
-};
-
-const Region = struct {
-    width: usize,
-    height: usize,
-    counts: []usize,
-
-    fn deinit(self: *Region, allocator: std.mem.Allocator) void {
-        allocator.free(self.counts);
-    }
-};
-
-fn parseShapes(allocator: std.mem.Allocator, input: []const u8) !std.ArrayList(Shape) {
-    var shapes = std.ArrayList(Shape).init(allocator);
-    var lines = std.mem.split(u8, input, "\n");
+// Generate all 8 orientations (4 rotations x 2 flips) of a shape
+fn generateOrientations(base: Shape) [8]Shape {
+    var orientations: [8]Shape = undefined;
     
-    var current_shape: ?Shape = null;
-    var current_lines = std.ArrayList([]const u8).init(allocator);
-    defer current_lines.deinit();
-    
-    while (lines.next()) |line| {
-        if (line.len == 0) {
-            if (current_shape != null) {
-                try shapes.append(current_shape.?);
-                current_shape = null;
-                current_lines.clearRetainingCapacity();
-            }
-            continue;
-        }
-        
-        // Check if this is a region line (contains 'x')
-        if (std.mem.indexOf(u8, line, "x") != null) {
-            if (current_shape != null) {
-                try shapes.append(current_shape.?);
-                current_shape = null;
-            }
-            break;
-        }
-        
-        // Check if this is a shape index line (contains ':')
-        if (std.mem.indexOf(u8, line, ":") != null) {
-            if (current_shape != null) {
-                try shapes.append(current_shape.?);
-                current_shape = null;
-                current_lines.clearRetainingCapacity();
-            }
-            current_shape = Shape{
-                .cells = std.ArrayList(Pos).init(allocator),
-                .width = 0,
-                .height = 0,
-            };
-            continue;
-        }
-        
-        // Parse shape line
-        if (current_shape != null) {
-            try current_lines.append(line);
-        }
-    }
-    
-    // Process the last shape if any
-    if (current_shape != null) {
-        try shapes.append(current_shape.?);
-    }
-    
-    // Now go back and parse the actual cells for each shape
-    shapes.clearRetainingCapacity();
-    lines = std.mem.split(u8, input, "\n");
-    current_shape = null;
-    current_lines.clearRetainingCapacity();
-    
-    while (lines.next()) |line| {
-        if (line.len == 0) {
-            if (current_lines.items.len > 0) {
-                var shape = Shape{
-                    .cells = std.ArrayList(Pos).init(allocator),
-                    .width = 0,
-                    .height = current_lines.items.len,
-                };
-                
-                for (current_lines.items, 0..) |shape_line, y| {
-                    if (shape_line.len > shape.width) shape.width = shape_line.len;
-                    for (shape_line, 0..) |c, x| {
-                        if (c == '#') {
-                            try shape.cells.append(.{ .x = @intCast(x), .y = @intCast(y) });
-                        }
-                    }
-                }
-                
-                try shapes.append(shape);
-                current_lines.clearRetainingCapacity();
-            }
-            continue;
-        }
-        
-        if (std.mem.indexOf(u8, line, "x") != null) {
-            break;
-        }
-        
-        if (std.mem.indexOf(u8, line, ":") != null) {
-            continue;
-        }
-        
-        try current_lines.append(line);
-    }
-    
-    return shapes;
-}
-
-fn parseRegions(allocator: std.mem.Allocator, input: []const u8, num_shapes: usize) !std.ArrayList(Region) {
-    var regions = std.ArrayList(Region).init(allocator);
-    var lines = std.mem.split(u8, input, "\n");
-    var in_regions = false;
-    
-    while (lines.next()) |line| {
-        if (line.len == 0) {
-            if (in_regions) continue;
-            in_regions = true;
-            continue;
-        }
-        
-        if (!in_regions) continue;
-        
-        // Parse region line: "4x4: 0 0 0 0 2 0"
-        var parts = std.mem.split(u8, line, ":");
-        const dims_str = parts.next() orelse continue;
-        const counts_str = std.mem.trim(u8, parts.next() orelse continue, " ");
-        
-        // Parse dimensions
-        var dim_parts = std.mem.split(u8, dims_str, "x");
-        const width = try std.fmt.parseInt(usize, dim_parts.next() orelse continue, 10);
-        const height = try std.fmt.parseInt(usize, dim_parts.next() orelse continue, 10);
-        
-        // Parse counts
-        var counts = try allocator.alloc(usize, num_shapes);
-        var count_iter = std.mem.split(u8, counts_str, " ");
-        var i: usize = 0;
-        while (count_iter.next()) |count_str| {
-            if (count_str.len == 0) continue;
-            if (i >= num_shapes) break;
-            counts[i] = try std.fmt.parseInt(usize, count_str, 10);
-            i += 1;
-        }
-        
-        try regions.append(.{
-            .width = width,
-            .height = height,
-            .counts = counts,
-        });
-    }
-    
-    return regions;
-}
-
-fn rotateShape(allocator: std.mem.Allocator, shape: *const Shape) !Shape {
-    var new_cells = std.ArrayList(Pos).init(allocator);
-    const new_width: usize = shape.height;
-    const new_height: usize = shape.width;
-    
-    for (shape.cells.items) |cell| {
-        // Rotate 90 degrees clockwise: (x, y) -> (h-1-y, x)
-        try new_cells.append(.{
-            .x = @as(i32, @intCast(shape.height)) - 1 - cell.y,
-            .y = cell.x,
-        });
-    }
-    
-    return Shape{
-        .cells = new_cells,
-        .width = new_width,
-        .height = new_height,
-    };
-}
-
-fn flipShape(allocator: std.mem.Allocator, shape: *const Shape) !Shape {
-    var new_cells = std.ArrayList(Pos).init(allocator);
-    
-    for (shape.cells.items) |cell| {
-        // Flip horizontally: (x, y) -> (w-1-x, y)
-        try new_cells.append(.{
-            .x = @as(i32, @intCast(shape.width)) - 1 - cell.x,
-            .y = cell.y,
-        });
-    }
-    
-    return Shape{
-        .cells = new_cells,
-        .width = shape.width,
-        .height = shape.height,
-    };
-}
-
-fn shapesEqual(a: *const Shape, b: *const Shape) bool {
-    if (a.width != b.width or a.height != b.height) return false;
-    if (a.cells.items.len != b.cells.items.len) return false;
-    
-    for (a.cells.items) |cell_a| {
-        var found = false;
-        for (b.cells.items) |cell_b| {
-            if (cell_a.x == cell_b.x and cell_a.y == cell_b.y) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) return false;
-    }
-    return true;
-}
-
-fn generateOrientations(allocator: std.mem.Allocator, shape: *const Shape) !std.ArrayList(Shape) {
-    var orientations = std.ArrayList(Shape).init(allocator);
-    
-    var current = Shape{
-        .cells = try shape.cells.clone(),
-        .width = shape.width,
-        .height = shape.height,
-    };
+    // Start with the base shape
+    var current = base;
     
     // Generate 4 rotations
-    for (0..4) |_| {
-        try orientations.append(.{
-            .cells = try current.cells.clone(),
-            .width = current.width,
-            .height = current.height,
-        });
-        
-        const next = try rotateShape(allocator, &current);
-        current.deinit();
-        current = next;
-    }
-    current.deinit();
-    
-    // Flip and generate 4 more rotations
-    const flipped = try flipShape(allocator, shape);
-    current = flipped;
-    
-    for (0..4) |_| {
-        try orientations.append(.{
-            .cells = try current.cells.clone(),
-            .width = current.width,
-            .height = current.height,
-        });
-        
-        const next = try rotateShape(allocator, &current);
-        current.deinit();
-        current = next;
-    }
-    current.deinit();
-    
-    // Deduplicate orientations
-    var unique = std.ArrayList(Shape).init(allocator);
-    for (orientations.items) |*orientation| {
-        var is_duplicate = false;
-        for (unique.items) |*existing| {
-            if (shapesEqual(orientation, existing)) {
-                is_duplicate = true;
-                break;
-            }
+    for (0..4) |r| {
+        orientations[r] = normalizeShape(current);
+        // Rotate 90 degrees clockwise: (row, col) -> (col, -row)
+        var rotated: Shape = undefined;
+        rotated.num_points = current.num_points;
+        for (0..current.num_points) |i| {
+            rotated.points[i] = .{
+                .row = current.points[i].col,
+                .col = -current.points[i].row,
+            };
         }
-        if (!is_duplicate) {
-            try unique.append(.{
-                .cells = try orientation.cells.clone(),
-                .width = orientation.width,
-                .height = orientation.height,
-            });
+        current = rotated;
+    }
+    
+    // Flip horizontally: (row, col) -> (row, -col)
+    current = base;
+    for (0..current.num_points) |i| {
+        current.points[i].col = -current.points[i].col;
+    }
+    
+    // Generate 4 rotations of flipped shape
+    for (0..4) |r| {
+        orientations[4 + r] = normalizeShape(current);
+        var rotated: Shape = undefined;
+        rotated.num_points = current.num_points;
+        for (0..current.num_points) |i| {
+            rotated.points[i] = .{
+                .row = current.points[i].col,
+                .col = -current.points[i].row,
+            };
         }
+        current = rotated;
     }
     
-    for (orientations.items) |*orientation| {
-        orientation.deinit();
-    }
-    orientations.deinit();
-    
-    return unique;
+    return orientations;
 }
 
-fn canPlaceShape(grid: [][]bool, shape: *const Shape, offset_x: i32, offset_y: i32, width: usize, height: usize) bool {
-    for (shape.cells.items) |cell| {
-        const x = cell.x + offset_x;
-        const y = cell.y + offset_y;
-        
-        if (x < 0 or y < 0) return false;
-        if (x >= @as(i32, @intCast(width)) or y >= @as(i32, @intCast(height))) return false;
-        if (grid[@intCast(y)][@intCast(x)]) return false;
+// Normalize shape so all points have non-negative coordinates starting from 0
+fn normalizeShape(shape: Shape) Shape {
+    var result = shape;
+    var min_row: i32 = std.math.maxInt(i32);
+    var min_col: i32 = std.math.maxInt(i32);
+    var max_row: i32 = std.math.minInt(i32);
+    var max_col: i32 = std.math.minInt(i32);
+    
+    for (0..shape.num_points) |i| {
+        min_row = @min(min_row, shape.points[i].row);
+        min_col = @min(min_col, shape.points[i].col);
+        max_row = @max(max_row, shape.points[i].row);
+        max_col = @max(max_col, shape.points[i].col);
+    }
+    
+    for (0..shape.num_points) |i| {
+        result.points[i].row -= min_row;
+        result.points[i].col -= min_col;
+    }
+    
+    result.height = @intCast(max_row - min_row + 1);
+    result.width = @intCast(max_col - min_col + 1);
+    
+    return result;
+}
+
+// Parse a shape from lines
+fn parseShape(lines: []const []const u8) Shape {
+    var shape: Shape = undefined;
+    shape.num_points = 0;
+    
+    for (lines, 0..) |line, row| {
+        for (line, 0..) |ch, col| {
+            if (ch == '#') {
+                shape.points[shape.num_points] = .{
+                    .row = @intCast(row),
+                    .col = @intCast(col),
+                };
+                shape.num_points += 1;
+            }
+        }
+    }
+    
+    shape.width = if (lines.len > 0) lines[0].len else 0;
+    shape.height = lines.len;
+    
+    return shape;
+}
+
+const Grid = struct {
+    cells: [MAX_GRID_HEIGHT][MAX_GRID_WIDTH]bool,
+    width: usize,
+    height: usize,
+    
+    fn init(width: usize, height: usize) Grid {
+        var grid: Grid = undefined;
+        grid.width = width;
+        grid.height = height;
+        for (0..height) |r| {
+            for (0..width) |c| {
+                grid.cells[r][c] = false;
+            }
+        }
+        return grid;
+    }
+    
+    fn canPlace(self: *const Grid, shape: Shape, start_row: usize, start_col: usize) bool {
+        for (0..shape.num_points) |i| {
+            const r = start_row + @as(usize, @intCast(shape.points[i].row));
+            const c = start_col + @as(usize, @intCast(shape.points[i].col));
+            if (r >= self.height or c >= self.width) return false;
+            if (self.cells[r][c]) return false;
+        }
+        return true;
+    }
+    
+    fn place(self: *Grid, shape: Shape, start_row: usize, start_col: usize) void {
+        for (0..shape.num_points) |i| {
+            const r = start_row + @as(usize, @intCast(shape.points[i].row));
+            const c = start_col + @as(usize, @intCast(shape.points[i].col));
+            self.cells[r][c] = true;
+        }
+    }
+    
+    fn remove(self: *Grid, shape: Shape, start_row: usize, start_col: usize) void {
+        for (0..shape.num_points) |i| {
+            const r = start_row + @as(usize, @intCast(shape.points[i].row));
+            const c = start_col + @as(usize, @intCast(shape.points[i].col));
+            self.cells[r][c] = false;
+        }
+    }
+};
+
+// All orientations for each shape
+const ShapeOrientations = struct {
+    orientations: [8]Shape,
+    unique_count: usize,
+};
+
+fn getUniqueOrientations(base: Shape) ShapeOrientations {
+    var result: ShapeOrientations = undefined;
+    const all_orientations = generateOrientations(base);
+    
+    result.unique_count = 0;
+    
+    outer: for (all_orientations) |orient| {
+        // Check if this orientation is already in our unique list
+        for (0..result.unique_count) |i| {
+            if (shapesEqual(result.orientations[i], orient)) {
+                continue :outer;
+            }
+        }
+        result.orientations[result.unique_count] = orient;
+        result.unique_count += 1;
+    }
+    
+    return result;
+}
+
+fn shapesEqual(a: Shape, b: Shape) bool {
+    if (a.num_points != b.num_points or a.width != b.width or a.height != b.height) return false;
+    
+    // Sort points and compare
+    var points_a: [9]Point = undefined;
+    var points_b: [9]Point = undefined;
+    for (0..a.num_points) |i| {
+        points_a[i] = a.points[i];
+        points_b[i] = b.points[i];
+    }
+    
+    // Simple bubble sort for small arrays
+    for (0..a.num_points) |i| {
+        for (i + 1..a.num_points) |j| {
+            if (pointLess(points_a[j], points_a[i])) {
+                const tmp = points_a[i];
+                points_a[i] = points_a[j];
+                points_a[j] = tmp;
+            }
+            if (pointLess(points_b[j], points_b[i])) {
+                const tmp = points_b[i];
+                points_b[i] = points_b[j];
+                points_b[j] = tmp;
+            }
+        }
+    }
+    
+    for (0..a.num_points) |i| {
+        if (points_a[i].row != points_b[i].row or points_a[i].col != points_b[i].col) return false;
     }
     return true;
 }
 
-fn placeShape(grid: [][]bool, shape: *const Shape, offset_x: i32, offset_y: i32) void {
-    for (shape.cells.items) |cell| {
-        const x = cell.x + offset_x;
-        const y = cell.y + offset_y;
-        grid[@intCast(y)][@intCast(x)] = true;
-    }
+fn pointLess(a: Point, b: Point) bool {
+    if (a.row != b.row) return a.row < b.row;
+    return a.col < b.col;
 }
 
-fn removeShape(grid: [][]bool, shape: *const Shape, offset_x: i32, offset_y: i32) void {
-    for (shape.cells.items) |cell| {
-        const x = cell.x + offset_x;
-        const y = cell.y + offset_y;
-        grid[@intCast(y)][@intCast(x)] = false;
-    }
-}
-
-var search_counter: usize = 0;
-
-fn tryFit(
-    grid: [][]bool,
-    all_orientations: []std.ArrayList(Shape),
-    presents: []usize,
-    index: usize,
-    width: usize,
-    height: usize,
+// Solve: try to place all shapes in the grid
+fn solve(
+    grid: *Grid,
+    shape_orientations: []const ShapeOrientations,
+    shape_counts: []usize,
+    shape_index: usize,
 ) bool {
-    if (index >= presents.len) {
-        return true; // All presents placed successfully
+    // Skip shapes with count 0
+    var idx = shape_index;
+    while (idx < shape_counts.len and shape_counts[idx] == 0) {
+        idx += 1;
     }
     
-    const shape_idx = presents[index];
-    const orientations = &all_orientations[shape_idx];
+    // All shapes placed
+    if (idx >= shape_counts.len) return true;
     
-    // Progress reporting
-    search_counter += 1;
-    if (search_counter % 50000 == 0) {
-        std.debug.print("Search depth {d}/{d}, attempts: {d}\n", .{index + 1, presents.len, search_counter});
-    }
+    const orientations = &shape_orientations[idx];
     
     // Try each orientation
-    for (orientations.items) |*orientation| {
-        // Try all positions
-        for (0..height) |y| {
-            for (0..width) |x| {
-                const offset_x: i32 = @intCast(x);
-                const offset_y: i32 = @intCast(y);
+    for (0..orientations.unique_count) |o| {
+        const shape = orientations.orientations[o];
+        
+        // Try each position
+        for (0..grid.height) |r| {
+            if (r + shape.height > grid.height) break;
+            for (0..grid.width) |c| {
+                if (c + shape.width > grid.width) continue;
                 
-                if (canPlaceShape(grid, orientation, offset_x, offset_y, width, height)) {
-                    placeShape(grid, orientation, offset_x, offset_y);
+                if (grid.canPlace(shape, r, c)) {
+                    grid.place(shape, r, c);
+                    shape_counts[idx] -= 1;
                     
-                    if (tryFit(grid, all_orientations, presents, index + 1, width, height)) {
+                    if (solve(grid, shape_orientations, shape_counts, idx)) {
+                        shape_counts[idx] += 1;
+                        grid.remove(shape, r, c);
                         return true;
                     }
                     
-                    removeShape(grid, orientation, offset_x, offset_y);
+                    shape_counts[idx] += 1;
+                    grid.remove(shape, r, c);
                 }
             }
         }
@@ -450,88 +269,144 @@ fn tryFit(
     return false;
 }
 
-fn canFitPresents(
-    allocator: std.mem.Allocator,
-    shapes: []const Shape,
-    all_orientations: []std.ArrayList(Shape),
-    region: *const Region,
-) !bool {
-    _ = shapes;
-    
-    // Create grid
-    var grid = try allocator.alloc([]bool, region.height);
-    defer {
-        for (grid) |row| allocator.free(row);
-        allocator.free(grid);
-    }
-    
-    for (0..region.height) |i| {
-        grid[i] = try allocator.alloc(bool, region.width);
-        for (0..region.width) |j| {
-            grid[i][j] = false;
-        }
-    }
-    
-    // Create list of presents to place
-    var presents = std.ArrayList(usize).init(allocator);
-    defer presents.deinit();
-    
-    for (region.counts, 0..) |count, shape_idx| {
-        for (0..count) |_| {
-            try presents.append(shape_idx);
-        }
-    }
-    
-    // Reset search counter for this region
-    search_counter = 0;
-    std.debug.print("\nTrying region {d}x{d} with {d} presents\n", .{region.width, region.height, presents.items.len});
-    
-    const result = tryFit(grid, all_orientations, presents.items, 0, region.width, region.height);
-    std.debug.print("Result: {s}, total search attempts: {d}\n", .{if (result) "SUCCESS" else "FAILED", search_counter});
-    
-    return result;
-}
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    // Read input from stdin
+    const stdin = try utils.read_from_stdin(allocator);
+    defer allocator.free(stdin);
     
-    const input = try std.io.getStdIn().readToEndAlloc(allocator, 1024 * 1024);
-    defer allocator.free(input);
+    // Split into sections by double newline
+    var sections = std.ArrayList([]const u8).init(allocator);
+    defer sections.deinit();
     
-    var shapes = try parseShapes(allocator, input);
-    defer {
-        for (shapes.items) |*shape| shape.deinit();
-        shapes.deinit();
-    }
-    
-    var regions = try parseRegions(allocator, input, shapes.items.len);
-    defer {
-        for (regions.items) |*region| region.deinit(allocator);
-        regions.deinit();
-    }
-    
-    // Generate all orientations for each shape
-    var all_orientations = try allocator.alloc(std.ArrayList(Shape), shapes.items.len);
-    defer {
-        for (all_orientations) |*orientations| {
-            for (orientations.items) |*shape| shape.deinit();
-            orientations.deinit();
-        }
-        allocator.free(all_orientations);
-    }
-    
-    for (shapes.items, 0..) |*shape, i| {
-        all_orientations[i] = try generateOrientations(allocator, shape);
-    }
-    
-    var count: usize = 0;
-    for (regions.items) |*region| {
-        if (try canFitPresents(allocator, shapes.items, all_orientations, region)) {
-            count += 1;
+    var section_iter = std.mem.splitSequence(u8, stdin, "\n\n");
+    while (section_iter.next()) |section| {
+        const trimmed = utils.strip_string(section);
+        if (trimmed.len > 0) {
+            try sections.append(trimmed);
         }
     }
     
-    std.debug.print("{d}\n", .{count});
+    // Parse shapes from first section(s)
+    var base_shapes: [MAX_SHAPES]Shape = undefined;
+    var shape_count: usize = 0;
+    
+    // Find where regions start (lines that contain 'x')
+    var region_start_section: usize = 0;
+    
+    for (sections.items, 0..) |section, section_idx| {
+        var lines_iter = std.mem.splitScalar(u8, section, '\n');
+        const first_line = lines_iter.next() orelse continue;
+        
+        if (utils.contains(first_line, "x")) {
+            region_start_section = section_idx;
+            break;
+        }
+        
+        // This is a shape definition
+        // First line should be "N:" where N is the index
+        if (utils.contains(first_line, ":")) {
+            var shape_lines: [3][]const u8 = undefined;
+            var line_count: usize = 0;
+            
+            while (lines_iter.next()) |line| {
+                if (line.len == 0) continue;
+                shape_lines[line_count] = line;
+                line_count += 1;
+                if (line_count >= 3) break;
+            }
+            
+            base_shapes[shape_count] = parseShape(shape_lines[0..line_count]);
+            shape_count += 1;
+        }
+    }
+    
+    // Pre-compute all orientations for each shape
+    var all_orientations: [MAX_SHAPES]ShapeOrientations = undefined;
+    for (0..shape_count) |i| {
+        all_orientations[i] = getUniqueOrientations(base_shapes[i]);
+    }
+    
+    // First, count total regions for progress reporting
+    var total_regions: usize = 0;
+    for (region_start_section..sections.items.len) |section_idx| {
+        const section = sections.items[section_idx];
+        var count_iter = std.mem.splitScalar(u8, section, '\n');
+        while (count_iter.next()) |line| {
+            const trimmed = utils.strip_string(line);
+            if (trimmed.len > 0 and utils.contains(trimmed, "x")) {
+                total_regions += 1;
+            }
+        }
+    }
+    
+    // Parse and solve regions
+    var valid_regions: usize = 0;
+    var current_region: usize = 0;
+    
+    const stderr = std.io.getStdErr().writer();
+    
+    for (region_start_section..sections.items.len) |section_idx| {
+        const section = sections.items[section_idx];
+        var lines_iter = std.mem.splitScalar(u8, section, '\n');
+        
+        while (lines_iter.next()) |line| {
+            const trimmed = utils.strip_string(line);
+            if (trimmed.len == 0) continue;
+            if (!utils.contains(trimmed, "x")) continue;
+            
+            current_region += 1;
+            
+            // Parse "WxH: c0 c1 c2 ..."
+            const colon_pos = std.mem.indexOf(u8, trimmed, ":") orelse continue;
+            const size_part = trimmed[0..colon_pos];
+            const counts_part = utils.strip_string(trimmed[colon_pos + 1..]);
+            
+            // Parse WxH
+            const x_pos = std.mem.indexOf(u8, size_part, "x") orelse continue;
+            const width = std.fmt.parseInt(usize, size_part[0..x_pos], 10) catch continue;
+            const height = std.fmt.parseInt(usize, size_part[x_pos + 1..], 10) catch continue;
+            
+            // Parse counts
+            var shape_counts: [MAX_SHAPES]usize = [_]usize{0} ** MAX_SHAPES;
+            var counts_iter = std.mem.splitScalar(u8, counts_part, ' ');
+            var count_idx: usize = 0;
+            while (counts_iter.next()) |count_str| {
+                if (count_str.len == 0) continue;
+                shape_counts[count_idx] = std.fmt.parseInt(usize, count_str, 10) catch 0;
+                count_idx += 1;
+            }
+            
+            // Quick area check - if total shape area exceeds grid area, skip
+            const grid_area = width * height;
+            var shape_area: usize = 0;
+            for (0..shape_count) |i| {
+                shape_area += base_shapes[i].num_points * shape_counts[i];
+            }
+            
+            var solvable = false;
+            if (shape_area <= grid_area) {
+                // Try to solve
+                var grid = Grid.init(width, height);
+                solvable = solve(&grid, all_orientations[0..shape_count], shape_counts[0..shape_count], 0);
+            }
+            
+            if (solvable) {
+                valid_regions += 1;
+            }
+            
+            // Report progress
+            try stderr.print("\rProcessing region {}/{} ({s})... valid so far: {}   ", .{ current_region, total_regions, size_part, valid_regions });
+        }
+    }
+    
+    // Clear progress line and print newline
+    try stderr.print("\r{s}\r", .{" " ** 80});
+    
+    // Print result to stdout
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("{}\n", .{valid_regions});
 }
